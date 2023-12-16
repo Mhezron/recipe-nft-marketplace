@@ -1,10 +1,26 @@
+type ErrorPayload = record { msg : text };
+
+type Error = variant {
+  InvalidPayload : ErrorPayload;
+  NotFound : ErrorPayload;
+  Unauthorized : ErrorPayload;
+  AlreadyPaid : ErrorPayload;
+};
+
+type Result<T> = variant {
+  Ok : T;
+  Err : Error;
+};
+
 type BidPayload = record {
   credit_order_id : nat64;
   offer_per_credit : nat64;
   client_id : nat64;
 };
+
 type Client = record { id : nat64; credits : nat64; name : text; phone : text };
 type ClientPayload = record { name : text; phone : text };
+
 type CreditOrder = record {
   id : nat64;
   credits : nat64;
@@ -13,19 +29,17 @@ type CreditOrder = record {
   min_offer_per_credit : nat64;
   producer_id : nat64;
 };
+
 type CreditOrderPayload = record {
   credits : nat64;
   min_offer_per_credit : nat64;
   producer_id : nat64;
 };
-type Error = variant {
-  InvalidPayload : record { msg : text };
-  NotFound : record { msg : text };
-  Unauthorized : record { msg : text };
-  AlreadyPaid : record { msg : text };
-};
+
 type InitPayload = record { password : text; credit_per_energy : nat64 };
+
 type PaidPayload = record { password : text; order_id : nat64 };
+
 type Producer = record {
   id : nat64;
   credits : nat64;
@@ -34,42 +48,35 @@ type Producer = record {
   name : text;
   phone : text;
 };
+
 type ProducerEnergyPayload = record {
   energy_supply : nat64;
   contract_password : text;
   producer_id : nat64;
 };
+
 type ProducerPayload = record { password : text; name : text; phone : text };
-type ProducerReturn = record {
-  id : nat64;
-  credits : nat64;
-  energy_supply : nat64;
-  name : text;
-  phone : text;
-};
-type Result = variant { Ok : Client; Err : Error };
-type Result_1 = variant { Ok : CreditOrder; Err : Error };
-type Result_2 = variant { Ok : Producer; Err : Error };
-type Result_3 = variant { Ok : text; Err : Error };
-type Result_4 = variant { Ok : vec CreditOrder; Err : Error };
-type Result_5 = variant { Ok : vec Client; Err : Error };
-type Result_6 = variant { Ok : ProducerReturn; Err : Error };
-type Result_7 = variant { Ok : vec ProducerReturn; Err : Error };
-type UpdateClientPayload = record { id : nat64; name : text; phone : text };
+type ProducerReturn = record { id : nat64; credits : nat64; energy_supply : nat64; name : text; phone : text };
+
+type Result_4 = Result<vec CreditOrder>;
+type Result_5 = Result<vec Client>;
+type Result_6 = Result<ProducerReturn>;
+type Result_7 = Result<vec ProducerReturn>;
+
 service : {
-  add_client : (ClientPayload) -> (Result);
-  add_credit_order : (CreditOrderPayload) -> (Result_1);
-  add_producer : (ProducerPayload) -> (Result_2);
-  award_producer_energy : (ProducerEnergyPayload) -> (Result_3);
-  bid : (BidPayload) -> (Result_3);
-  get_all_credit_orders : () -> (Result_4) query;
-  get_all_incomplete_orders : () -> (Result_4) query;
-  get_client : (nat64) -> (Result) query;
-  get_clients : () -> (Result_5) query;
-  get_credit_order_by_id : (nat64) -> (Result_1) query;
-  get_producer : (nat64) -> (Result_6) query;
-  get_producers : () -> (Result_7) query;
-  init_contract : (InitPayload) -> (Result_3);
-  mark_order_paid : (PaidPayload) -> (Result_3);
-  update_client : (UpdateClientPayload) -> (Result_3);
+  add_client : (ClientPayload) -> Result<Client>;
+  add_credit_order : (CreditOrderPayload) -> Result<CreditOrder>;
+  add_producer : (ProducerPayload) -> Result<Producer>;
+  award_producer_energy : (ProducerEnergyPayload) -> Result<text>;
+  bid : (BidPayload) -> Result<text>;
+  get_all_credit_orders : () -> Result_4 query;
+  get_all_incomplete_orders : () -> Result_4 query;
+  get_client : (nat64) -> Result<Client> query;
+  get_clients : () -> Result_5 query;
+  get_credit_order_by_id : (nat64) -> Result<CreditOrder> query;
+  get_producer : (nat64) -> Result_6 query;
+  get_producers : () -> Result_7 query;
+  init_contract : (InitPayload) -> Result<Producer>;
+  mark_order_paid : (PaidPayload) -> Result<text>;
+  update_client : (UpdateClientPayload) -> Result<text>;
 }
