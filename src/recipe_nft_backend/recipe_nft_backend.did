@@ -1,0 +1,67 @@
+type BuyNftPayload = record {
+  password : text;
+  recipe_id : nat64;
+  user_id : nat64;
+};
+type EditCommunityRecipe = record {
+  recipe_id : nat64;
+  description : text;
+  user_id : nat64;
+};
+type EditRecipePayload = record {
+  title : text;
+  password : text;
+  recipe_id : nat64;
+  description : text;
+  is_community : bool;
+  price : nat32;
+  is_for_sale : bool;
+};
+type Error = variant {
+  InvalidPayload : record { msg : text };
+  NotFound : record { msg : text };
+  Unauthorized : record { msg : text };
+  AlreadyPaid : record { msg : text };
+};
+type Recipe = record {
+  id : nat64;
+  title : text;
+  reviews : vec text;
+  description : text;
+  user_id : nat64;
+  is_community : bool;
+  category : text;
+  price : nat32;
+};
+type RecipePayload = record {
+  title : text;
+  description : text;
+  is_community : bool;
+  owner_id : nat64;
+  category : text;
+  price : nat32;
+  is_for_sale : bool;
+};
+type Result = variant { Ok : Recipe; Err : Error };
+type Result_1 = variant { Ok : ReturnUser; Err : Error };
+type Result_2 = variant { Ok : text; Err : Error };
+type Result_3 = variant { Ok : vec Recipe; Err : Error };
+type ReturnUser = record {
+  id : nat64;
+  balance : nat32;
+  recipes : vec nat64;
+  name : text;
+  email : text;
+};
+type UserPayload = record { password : text; name : text; email : text };
+service : {
+  add_recipe : (RecipePayload) -> (Result);
+  add_user : (UserPayload) -> (Result_1);
+  buy_recipe_nft : (BuyNftPayload) -> (Result_2);
+  edit_community_recipe : (EditCommunityRecipe) -> (Result);
+  edit_owned_recipe : (EditRecipePayload) -> (Result);
+  get_all_recipes : () -> (Result_3) query;
+  get_recipe_by_category : (text) -> (Result_3) query;
+  get_recipe_by_id : (nat64) -> (Result) query;
+  get_user : (nat64) -> (Result_1) query;
+}

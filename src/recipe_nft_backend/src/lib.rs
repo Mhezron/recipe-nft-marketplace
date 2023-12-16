@@ -11,6 +11,7 @@ type IdCell = Cell<u64, Memory>;
 
 #[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
 struct Contract {
+    id: u64,
     email: String,
     password: String,
 }
@@ -24,6 +25,7 @@ struct Recipe {
     price: u32,
     user_id: u64,
     is_community: bool,
+    is_for_sale: bool,
     reviews: Vec<String>,
 }
 
@@ -181,6 +183,76 @@ struct BuyNftPayload {
     password: String,
 }
 
+#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+struct FundUser {
+    user_id: u64,
+    amount: u32,
+    password: String,
+}
+
+// update function to init contract
+#[ic_cdk::update]
+fn init_contract(payload: InitPayload) -> Result<Contract, Error> {
+    let contract = Contract {
+        id: 0,
+        email: payload.email,
+        password: payload.password,
+    };
+
+    match CONTRACT_STORAGE.with(|s| s.borrow_mut().insert(0, contract.clone())) {
+        Some(_) => Err(Error::NotFound {
+            msg: format!("Could not add recipe email: {}", contract.email),
+        }),
+        None => Ok(contract),
+    }
+}
+
+// update function to fund user
+#[ic_cdk::update]
+fn fund_user(payload: FundUser) -> Result<ReturnUser, Error> {
+    let contract = CONTRACT_STORAGE.with(|s| s.borrow().get(&0));
+    match contract {
+        Some(contract) => {
+            if contract.password != payload.password {
+                return Err(Error::NotFound {
+                    msg: "Invalid password please try again".to_string(),
+                });
+            }
+
+            let user = USER_STORAGE.with(|u| u.borrow_mut().get(&payload.user_id));
+
+            match user {
+                Some(user) => {
+                    let new_user = User {
+                        id: user.id.clone(),
+                        balance: user.balance + payload.amount,
+                        ..user
+                    };
+
+                    match USER_STORAGE.with(|u| u.borrow_mut().insert(user.id, new_user.clone())) {
+                        Some(_) => Ok(ReturnUser {
+                            id: new_user.id,
+                            name: new_user.name,
+                            email: new_user.email,
+                            recipes: new_user.recipes,
+                            balance: new_user.balance,
+                        }),
+                        None => Err(Error::NotFound {
+                            msg: "Could not fund user balance".to_string(),
+                        }),
+                    }
+                }
+                None => Err(Error::NotFound {
+                    msg: "User could not be found".to_string(),
+                }),
+            }
+        }
+        None => Err(Error::NotFound {
+            msg: "Contract has not been initialized".to_string(),
+        }),
+    }
+}
+
 // Query function to get all recipes
 #[ic_cdk::query]
 fn get_all_recipes() -> Result<Vec<Recipe>, Error> {
@@ -194,6 +266,29 @@ fn get_all_recipes() -> Result<Vec<Recipe>, Error> {
             msg: format!("no Recipes found"),
         }),
         _ => Ok(recipes),
+    }
+}
+
+// Query function to get all for sale recipes
+#[ic_cdk::query]
+fn get_all_for_sale_recipes() -> Result<Vec<Recipe>, Error> {
+    // Retrieve all Recipes from the storage
+    let recipe_map: Vec<(u64, Recipe)> = RECIPE_STORAGE.with(|s| s.borrow().iter().collect());
+    // Extract the Recipes from the tuple and create a vector
+    let recipes: Vec<Recipe> = recipe_map.into_iter().map(|(_, recipe)| recipe).collect();
+
+    // Filter the recipes by category
+    let recipes_by_category: Vec<Recipe> = recipes
+        .into_iter()
+        .filter(|recipe| recipe.is_for_sale && !recipe.is_community)
+        .collect();
+
+    // Check if any recipes are found
+    match recipes_by_category.len() {
+        0 => Err(Error::NotFound {
+            msg: format!("No recipes up for sale could be found"),
+        }),
+        _ => Ok(recipes_by_category),
     }
 }
 
@@ -257,16 +352,52 @@ fn add_recipe(payload: RecipePayload) -> Result<Recipe, Error> {
         description: payload.description,
         category: payload.category,
         is_community: payload.is_community,
+        is_for_sale: payload.is_for_sale,
         price,
         user_id: payload.owner_id,
         reviews: vec![],
     };
 
+    // add recipe to user
+    let user_id = payload.owner_id;
+    let recipe_id = id;
+
+    match add_recipe_to_owner(user_id, recipe_id) {
+        Ok(_) => (),
+        Err(e) => return Err(e),
+    }
+
     match RECIPE_STORAGE.with(|s| s.borrow_mut().insert(id, recipe.clone())) {
-        Some(_) => Err(Error::InvalidPayload {
+        Some(_) => Err(Error::NotFound {
             msg: format!("Could not add recipe title: {}", payload.title),
         }),
         None => Ok(recipe),
+    }
+}
+
+// function to add recipe to user
+fn add_recipe_to_owner(user_id: u64, recipe_id: u64) -> Result<(), Error> {
+    let user = USER_STORAGE.with(|users| users.borrow().get(&user_id));
+    match user {
+        Some(user) => {
+            let mut new_user_recipes = user.recipes.clone();
+            new_user_recipes.push(recipe_id);
+            let new_user = User {
+                recipes: new_user_recipes,
+                ..user
+            };
+            // update user in storage
+            match USER_STORAGE.with(|s| s.borrow_mut().insert(user.id, new_user.clone())) {
+                None => Err(Error::NotFound {
+                    msg: format!("Could not update user recipes"),
+                }),
+
+                Some(_) => Ok(()),
+            }
+        }
+        None => Err(Error::NotFound {
+            msg: format!("Could not find recipe Buyer"),
+        }),
     }
 }
 
@@ -278,7 +409,7 @@ fn edit_owned_recipe(payload: EditRecipePayload) -> Result<Recipe, Error> {
     match recipe {
         Some(recipe) => {
             if recipe.is_community {
-                return Err(Error::InvalidPayload { msg: format!("You can only change descriptions of community Recipes. Try edit_community_recipe method") });
+                return Err(Error::NotFound { msg: format!("You can only change descriptions of community Recipes. Try edit_community_recipe method") });
             }
             // get recipe writer, by user_id
             let user = USER_STORAGE.with(|recipes| recipes.borrow().get(&recipe.user_id));
@@ -291,6 +422,7 @@ fn edit_owned_recipe(payload: EditRecipePayload) -> Result<Recipe, Error> {
                             description: payload.description,
                             category: recipe.category,
                             is_community: payload.is_community,
+                            is_for_sale: payload.is_for_sale,
                             price: payload.price,
                             user_id: recipe.user_id,
                             reviews: recipe.reviews,
@@ -299,10 +431,10 @@ fn edit_owned_recipe(payload: EditRecipePayload) -> Result<Recipe, Error> {
                         match RECIPE_STORAGE
                             .with(|s| s.borrow_mut().insert(recipe.id, new_recipe.clone()))
                         {
-                            Some(_) => Err(Error::InvalidPayload {
+                            Some(_) => Ok(new_recipe),
+                            None => Err(Error::NotFound {
                                 msg: format!("Could not edit recipe title: {}", payload.title),
                             }),
-                            None => Ok(new_recipe),
                         }
                     } else {
                         return Err(Error::Unauthorized {
@@ -340,16 +472,17 @@ fn edit_community_recipe(payload: EditCommunityRecipe) -> Result<Recipe, Error> 
                 description: payload.description,
                 category: recipe.category,
                 is_community: recipe.is_community,
+                is_for_sale: recipe.is_for_sale,
                 price: recipe.price,
                 user_id: recipe.user_id,
                 reviews: recipe.reviews,
             };
 
             match RECIPE_STORAGE.with(|s| s.borrow_mut().insert(recipe.id, new_recipe.clone())) {
-                Some(_) => Err(Error::InvalidPayload {
+                None => Err(Error::NotFound {
                     msg: format!("Could not edit recipe title: {}", recipe.title),
                 }),
-                None => Ok(new_recipe),
+                Some(_) => Ok(new_recipe),
             }
         }
         None => Err(Error::NotFound {
@@ -367,6 +500,12 @@ fn buy_recipe_nft(payload: BuyNftPayload) -> Result<String, Error> {
     let user = USER_STORAGE.with(|users| users.borrow().get(&payload.user_id));
     match recipe {
         Some(recipe) => {
+            // check if recipe is up for sale
+            if !recipe.is_for_sale {
+                return Err(Error::NotFound {
+                    msg: format!("Sorry, This recipe is not currently for sale"),
+                });
+            }
             // check if user exists
             match user {
                 Some(user) => {
@@ -379,29 +518,42 @@ fn buy_recipe_nft(payload: BuyNftPayload) -> Result<String, Error> {
 
                     // check if user has enough balance
                     if user.balance < recipe.price {
-                        return Err(Error::InvalidPayload {
+                        return Err(Error::NotFound {
                             msg: format!("You do not have enough balance to buy this recipe"),
                         });
                     }
                     // check if user is not recipe owner
                     if user.id == recipe.user_id {
-                        return Err(Error::InvalidPayload {
+                        return Err(Error::NotFound {
                             msg: format!("You can not buy your own recipe"),
                         });
                     }
                     // check if user has already bought recipe
                     if user.recipes.contains(&recipe.id) {
-                        return Err(Error::InvalidPayload {
+                        return Err(Error::NotFound {
                             msg: format!("You have already bought this recipe"),
                         });
                     }
                     // get recipe owner
-                    match transfer_recipe_to_user(payload.user_id, recipe) {
-                        Ok(_) => Ok(format!("Recipe bought successfully, Enjoy !!")),
+                    match transfer_recipe_to_user(payload.user_id, recipe.clone()) {
+                        Ok(_) => (),
                         Err(e) => return Err(e),
                     }
 
-                    // return format!("")
+                    match RECIPE_STORAGE.with(|r| {
+                        r.borrow_mut().insert(
+                            recipe.id,
+                            Recipe {
+                                user_id: user.id,
+                                ..recipe
+                            },
+                        )
+                    }) {
+                        Some(_) => Ok(format!("Recipe bought successfully, Enjoy !!")),
+                        None => Err(Error::NotFound {
+                            msg: "could not update recipe user_id".to_string(),
+                        }),
+                    }
                 }
                 None => Err(Error::NotFound {
                     msg: format!("user not found"),
@@ -410,6 +562,46 @@ fn buy_recipe_nft(payload: BuyNftPayload) -> Result<String, Error> {
         }
         None => Err(Error::NotFound {
             msg: format!("recipe not found"),
+        }),
+    }
+}
+
+// add review to recipe
+#[ic_cdk::update]
+fn add_review(payload: ReviewPayload) -> Result<Recipe, Error> {
+    // get recipe
+    let recipe = RECIPE_STORAGE.with(|recipes| recipes.borrow().get(&payload.recipe_id));
+    match recipe {
+        Some(recipe) => {
+            let mut new_reviews = recipe.reviews.clone();
+            new_reviews.push(payload.review);
+            let new_recipe = Recipe {
+                reviews: new_reviews,
+                ..recipe
+            };
+
+            match RECIPE_STORAGE.with(|s| s.borrow_mut().insert(recipe.id, new_recipe.clone())) {
+                Some(_) => Ok(new_recipe),
+                None => Err(Error::NotFound {
+                    msg: format!("Could not add review to recipe id: {}", recipe.id),
+                }),
+            }
+        }
+        None => Err(Error::NotFound {
+            msg: format!("recipe of id: {} not found", payload.recipe_id),
+        }),
+    }
+}
+
+// get recipe reviews by id
+#[ic_cdk::query]
+fn get_recipe_reviews(id: u64) -> Result<Vec<String>, Error> {
+    // get recipe
+    let recipe = RECIPE_STORAGE.with(|recipes| recipes.borrow().get(&id));
+    match recipe {
+        Some(recipe) => Ok(recipe.reviews),
+        None => Err(Error::NotFound {
+            msg: format!("recipe of id: {} not found", id),
         }),
     }
 }
@@ -436,10 +628,7 @@ fn transfer_recipe_to_user(user_id: u64, recipe: Recipe) -> Result<(), Error> {
                 s.borrow_mut()
                     .insert(recipe_owner.id, new_recipe_owner.clone())
             }) {
-                Some(_) => Err(Error::InvalidPayload {
-                    msg: format!("Could not update recipe owner balance"),
-                }),
-                None => {
+                Some(_) => {
                     // update user balance
                     match recipe_buyer {
                         Some(recipe_buyer) => {
@@ -454,11 +643,10 @@ fn transfer_recipe_to_user(user_id: u64, recipe: Recipe) -> Result<(), Error> {
                             match USER_STORAGE
                                 .with(|s| s.borrow_mut().insert(recipe_buyer.id, new_user.clone()))
                             {
-                                Some(_) => Err(Error::InvalidPayload {
+                                Some(_) => Ok(()),
+                                None => Err(Error::NotFound {
                                     msg: format!("Could not update user balance"),
                                 }),
-
-                                None => Ok(()),
                             }
                         }
                         None => Err(Error::NotFound {
@@ -466,6 +654,9 @@ fn transfer_recipe_to_user(user_id: u64, recipe: Recipe) -> Result<(), Error> {
                         }),
                     }
                 }
+                None => Err(Error::NotFound {
+                    msg: format!("Could not update recipe owner balance"),
+                }),
             }
         }
         None => Err(Error::NotFound {
@@ -519,7 +710,7 @@ fn add_user(payload: UserPayload) -> Result<ReturnUser, Error> {
     };
 
     match USER_STORAGE.with(|s| s.borrow_mut().insert(id, user.clone())) {
-        Some(_) => Err(Error::InvalidPayload {
+        Some(_) => Err(Error::NotFound {
             msg: format!("Could not add user name: {}", payload.name),
         }),
         None => Ok(return_user),
@@ -530,8 +721,7 @@ fn add_user(payload: UserPayload) -> Result<ReturnUser, Error> {
 #[derive(candid::CandidType, Deserialize, Serialize)]
 enum Error {
     NotFound { msg: String },
-    AlreadyPaid { msg: String },
-    InvalidPayload { msg: String },
+    AlreadyInit { msg: String },
     Unauthorized { msg: String },
 }
 
