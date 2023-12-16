@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "src/recipe_nft_backend",
+]
+resolver = "2"

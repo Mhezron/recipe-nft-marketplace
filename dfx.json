@@ -1,0 +1,30 @@
+{
+  "canisters": {
+    "recipe_nft_backend": {
+      "candid": "src/recipe_nft_backend/recipe_nft_backend.did",
+      "package": "recipe_nft_backend",
+      "type": "rust"
+    },
+    "recipe_nft_frontend": {
+      "dependencies": [
+        "recipe_nft_backend"
+      ],
+      "frontend": {
+        "entrypoint": "src/recipe_nft_frontend/src/index.html"
+      },
+      "source": [
+        "src/recipe_nft_frontend/assets",
+        "dist/recipe_nft_frontend/"
+      ],
+      "type": "assets"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}
