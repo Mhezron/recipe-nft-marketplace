@@ -37,53 +37,11 @@ struct User {
     recipes: Vec<u64>,
 }
 
-// Implement the 'Storable' trait for 'Recipe', 'User' and 'CommunityRecipe'
-
-impl Storable for User {
-    // Conversion to bytes
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-    // Conversion from bytes
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-impl Storable for Recipe {
-    // Conversion to bytes
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-    // Conversion from bytes
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-impl Storable for Contract {
-    // Conversion to bytes
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-    // Conversion from bytes
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-// Implement the 'BoundedStorable' trait for 'Recipe', 'User' and 'CommunityRecipe'
-impl BoundedStorable for User {
-    const MAX_SIZE: u32 = 1024;
-    const IS_FIXED_SIZE: bool = false;
-}
-
-impl BoundedStorable for Recipe {
-    const MAX_SIZE: u32 = 1024;
-    const IS_FIXED_SIZE: bool = false;
-}
-
-impl BoundedStorable for Contract {
+// Implement the 'BoundedStorable' trait for 'Recipe', 'User', and 'Contract'
+impl<T> BoundedStorable for T
+where
+    T: Storable,
+{
     const MAX_SIZE: u32 = 1024;
     const IS_FIXED_SIZE: bool = false;
 }
@@ -126,6 +84,7 @@ struct RecipePayload {
     price: u32,
     owner_id: u64,
 }
+
 
 #[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
 struct UserPayload {
