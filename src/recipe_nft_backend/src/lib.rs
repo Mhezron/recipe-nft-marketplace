@@ -4,6 +4,7 @@ use candid::{Decode, Encode};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::{BoundedStorable, Cell, DefaultMemoryImpl, StableBTreeMap, Storable};
 use std::{borrow::Cow, cell::RefCell};
+use validator::Validate;
 
 // Define type aliases for convenience
 type Memory = VirtualMemory<DefaultMemoryImpl>;
@@ -118,10 +119,12 @@ thread_local! {
 }
 
 // Struct for payload date used in update functions
-#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default, Validate)]
 struct RecipePayload {
+    #[validate(length(min = 3))]
     title: String,
     category: String,
+    #[validate(length(min = 6))]
     description: String,
     is_community: bool,
     is_for_sale: bool,
@@ -129,9 +132,11 @@ struct RecipePayload {
     owner_id: u64,
 }
 
-#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default, Validate)]
 struct UserPayload {
+    #[validate(length(min = 3))]
     name: String,
+    #[validate(length(min = 3))]
     password: String,
     email: String,
 }
@@ -142,9 +147,11 @@ struct ReviewPayload {
     review: String,
 }
 
-#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default)]
+#[derive(candid::CandidType, Clone, Serialize, Deserialize, Default, Validate)]
 struct InitPayload {
+    #[validate(length(min = 3))]
     email: String,
+    #[validate(length(min = 4))]
     password: String,
 }
 
@@ -193,6 +200,21 @@ struct FundUser {
 // update function to init contract
 #[ic_cdk::update]
 fn init_contract(payload: InitPayload) -> Result<Contract, Error> {
+    // validate payload
+    let validate_payload = payload.validate();
+    if validate_payload.is_err() {
+        return Err(Error::InvalidPayload {
+            msg: validate_payload.unwrap_err().to_string(),
+        });
+    }
+
+    let contract = CONTRACT_STORAGE.with(|s| s.borrow().get(&0));
+    if contract.is_some() {
+        return Err(Error::AlreadyInit {
+            msg: "Contract has already been initialized".to_string(),
+        });
+    }
+
     let contract = Contract {
         id: 0,
         email: payload.email,
@@ -200,7 +222,7 @@ fn init_contract(payload: InitPayload) -> Result<Contract, Error> {
     };
 
     match CONTRACT_STORAGE.with(|s| s.borrow_mut().insert(0, contract.clone())) {
-        Some(_) => Err(Error::NotFound {
+        Some(_) => Err(Error::InvalidPayload {
             msg: format!("Could not add recipe email: {}", contract.email),
         }),
         None => Ok(contract),
@@ -333,6 +355,14 @@ fn get_recipe_by_id(id: u64) -> Result<Recipe, Error> {
 // Create new Recipe
 #[ic_cdk::update]
 fn add_recipe(payload: RecipePayload) -> Result<Recipe, Error> {
+    // validate payload
+    let validate_payload = payload.validate();
+    if validate_payload.is_err() {
+        return Err(Error::InvalidPayload {
+            msg: validate_payload.unwrap_err().to_string(),
+        });
+    }
+
     let id = ID_COUNTER
         .with(|counter| {
             let current_id = *counter.borrow().get();
@@ -368,7 +398,7 @@ fn add_recipe(payload: RecipePayload) -> Result<Recipe, Error> {
     }
 
     match RECIPE_STORAGE.with(|s| s.borrow_mut().insert(id, recipe.clone())) {
-        Some(_) => Err(Error::NotFound {
+        Some(_) => Err(Error::InvalidPayload {
             msg: format!("Could not add recipe title: {}", payload.title),
         }),
         None => Ok(recipe),
@@ -388,7 +418,7 @@ fn add_recipe_to_owner(user_id: u64, recipe_id: u64) -> Result<(), Error> {
             };
             // update user in storage
             match USER_STORAGE.with(|s| s.borrow_mut().insert(user.id, new_user.clone())) {
-                None => Err(Error::NotFound {
+                None => Err(Error::InvalidPayload {
                     msg: format!("Could not update user recipes"),
                 }),
 
@@ -409,13 +439,18 @@ fn edit_owned_recipe(payload: EditRecipePayload) -> Result<Recipe, Error> {
     match recipe {
         Some(recipe) => {
             if recipe.is_community {
-                return Err(Error::NotFound { msg: format!("You can only change descriptions of community Recipes. Try edit_community_recipe method") });
+                return Err(Error::InvalidPayload { msg: format!("You can only change descriptions of community Recipes. Try edit_community_recipe method") });
             }
             // get recipe writer, by user_id
             let user = USER_STORAGE.with(|recipes| recipes.borrow().get(&recipe.user_id));
             match user {
                 Some(user) => {
                     if user.password == payload.password {
+                        let price = if payload.is_community {
+                            0
+                        } else {
+                            payload.price
+                        };
                         let new_recipe = Recipe {
                             id: recipe.id,
                             title: payload.title.clone(),
@@ -423,7 +458,7 @@ fn edit_owned_recipe(payload: EditRecipePayload) -> Result<Recipe, Error> {
                             category: recipe.category,
                             is_community: payload.is_community,
                             is_for_sale: payload.is_for_sale,
-                            price: payload.price,
+                            price,
                             user_id: recipe.user_id,
                             reviews: recipe.reviews,
                         };
@@ -432,7 +467,7 @@ fn edit_owned_recipe(payload: EditRecipePayload) -> Result<Recipe, Error> {
                             .with(|s| s.borrow_mut().insert(recipe.id, new_recipe.clone()))
                         {
                             Some(_) => Ok(new_recipe),
-                            None => Err(Error::NotFound {
+                            None => Err(Error::InvalidPayload {
                                 msg: format!("Could not edit recipe title: {}", payload.title),
                             }),
                         }
@@ -479,7 +514,7 @@ fn edit_community_recipe(payload: EditCommunityRecipe) -> Result<Recipe, Error> 
             };
 
             match RECIPE_STORAGE.with(|s| s.borrow_mut().insert(recipe.id, new_recipe.clone())) {
-                None => Err(Error::NotFound {
+                None => Err(Error::InvalidPayload {
                     msg: format!("Could not edit recipe title: {}", recipe.title),
                 }),
                 Some(_) => Ok(new_recipe),
@@ -500,9 +535,16 @@ fn buy_recipe_nft(payload: BuyNftPayload) -> Result<String, Error> {
     let user = USER_STORAGE.with(|users| users.borrow().get(&payload.user_id));
     match recipe {
         Some(recipe) => {
+            // check if recipe is community
+            if recipe.is_community {
+                return Err(Error::InvalidPayload {
+                    msg: format!("This is a community recipe, you can not buy it"),
+                });
+            }
+
             // check if recipe is up for sale
             if !recipe.is_for_sale {
-                return Err(Error::NotFound {
+                return Err(Error::InvalidPayload {
                     msg: format!("Sorry, This recipe is not currently for sale"),
                 });
             }
@@ -518,19 +560,19 @@ fn buy_recipe_nft(payload: BuyNftPayload) -> Result<String, Error> {
 
                     // check if user has enough balance
                     if user.balance < recipe.price {
-                        return Err(Error::NotFound {
+                        return Err(Error::InvalidPayload {
                             msg: format!("You do not have enough balance to buy this recipe"),
                         });
                     }
                     // check if user is not recipe owner
                     if user.id == recipe.user_id {
-                        return Err(Error::NotFound {
+                        return Err(Error::InvalidPayload {
                             msg: format!("You can not buy your own recipe"),
                         });
                     }
                     // check if user has already bought recipe
                     if user.recipes.contains(&recipe.id) {
-                        return Err(Error::NotFound {
+                        return Err(Error::InvalidPayload {
                             msg: format!("You have already bought this recipe"),
                         });
                     }
@@ -582,7 +624,7 @@ fn add_review(payload: ReviewPayload) -> Result<Recipe, Error> {
 
             match RECIPE_STORAGE.with(|s| s.borrow_mut().insert(recipe.id, new_recipe.clone())) {
                 Some(_) => Ok(new_recipe),
-                None => Err(Error::NotFound {
+                None => Err(Error::InvalidPayload {
                     msg: format!("Could not add review to recipe id: {}", recipe.id),
                 }),
             }
@@ -644,7 +686,7 @@ fn transfer_recipe_to_user(user_id: u64, recipe: Recipe) -> Result<(), Error> {
                                 .with(|s| s.borrow_mut().insert(recipe_buyer.id, new_user.clone()))
                             {
                                 Some(_) => Ok(()),
-                                None => Err(Error::NotFound {
+                                None => Err(Error::InvalidPayload {
                                     msg: format!("Could not update user balance"),
                                 }),
                             }
@@ -654,7 +696,7 @@ fn transfer_recipe_to_user(user_id: u64, recipe: Recipe) -> Result<(), Error> {
                         }),
                     }
                 }
-                None => Err(Error::NotFound {
+                None => Err(Error::InvalidPayload {
                     msg: format!("Could not update recipe owner balance"),
                 }),
             }
@@ -685,6 +727,14 @@ fn get_user(id: u64) -> Result<ReturnUser, Error> {
 // Update function to add a user
 #[ic_cdk::update]
 fn add_user(payload: UserPayload) -> Result<ReturnUser, Error> {
+    // validate payload
+    let validate_payload = payload.validate();
+    if validate_payload.is_err() {
+        return Err(Error::InvalidPayload {
+            msg: validate_payload.unwrap_err().to_string(),
+        });
+    }
+
     let id = ID_COUNTER
         .with(|counter| {
             let current_id = *counter.borrow().get();
@@ -710,7 +760,7 @@ fn add_user(payload: UserPayload) -> Result<ReturnUser, Error> {
     };
 
     match USER_STORAGE.with(|s| s.borrow_mut().insert(id, user.clone())) {
-        Some(_) => Err(Error::NotFound {
+        Some(_) => Err(Error::InvalidPayload {
             msg: format!("Could not add user name: {}", payload.name),
         }),
         None => Ok(return_user),
@@ -722,6 +772,7 @@ fn add_user(payload: UserPayload) -> Result<ReturnUser, Error> {
 enum Error {
     NotFound { msg: String },
     AlreadyInit { msg: String },
+    InvalidPayload { msg: String },
     Unauthorized { msg: String },
 }
 

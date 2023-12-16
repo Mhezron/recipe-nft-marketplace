@@ -3,6 +3,7 @@ type BuyNftPayload = record {
   recipe_id : nat64;
   user_id : nat64;
 };
+type Contract = record { id : nat64; password : text; email : text };
 type EditCommunityRecipe = record {
   recipe_id : nat64;
   description : text;
@@ -21,8 +22,10 @@ type Error = variant {
   InvalidPayload : record { msg : text };
   NotFound : record { msg : text };
   Unauthorized : record { msg : text };
-  AlreadyPaid : record { msg : text };
+  AlreadyInit : record { msg : text };
 };
+type FundUser = record { password : text; user_id : nat64; amount : nat32 };
+type InitPayload = record { password : text; email : text };
 type Recipe = record {
   id : nat64;
   title : text;
@@ -32,6 +35,7 @@ type Recipe = record {
   is_community : bool;
   category : text;
   price : nat32;
+  is_for_sale : bool;
 };
 type RecipePayload = record {
   title : text;
@@ -46,6 +50,8 @@ type Result = variant { Ok : Recipe; Err : Error };
 type Result_1 = variant { Ok : ReturnUser; Err : Error };
 type Result_2 = variant { Ok : text; Err : Error };
 type Result_3 = variant { Ok : vec Recipe; Err : Error };
+type Result_4 = variant { Ok : vec text; Err : Error };
+type Result_5 = variant { Ok : Contract; Err : Error };
 type ReturnUser = record {
   id : nat64;
   balance : nat32;
@@ -53,15 +59,21 @@ type ReturnUser = record {
   name : text;
   email : text;
 };
+type ReviewPayload = record { review : text; recipe_id : nat64 };
 type UserPayload = record { password : text; name : text; email : text };
 service : {
   add_recipe : (RecipePayload) -> (Result);
+  add_review : (ReviewPayload) -> (Result);
   add_user : (UserPayload) -> (Result_1);
   buy_recipe_nft : (BuyNftPayload) -> (Result_2);
   edit_community_recipe : (EditCommunityRecipe) -> (Result);
   edit_owned_recipe : (EditRecipePayload) -> (Result);
+  fund_user : (FundUser) -> (Result_1);
+  get_all_for_sale_recipes : () -> (Result_3) query;
   get_all_recipes : () -> (Result_3) query;
   get_recipe_by_category : (text) -> (Result_3) query;
   get_recipe_by_id : (nat64) -> (Result) query;
+  get_recipe_reviews : (nat64) -> (Result_4) query;
   get_user : (nat64) -> (Result_1) query;
+  init_contract : (InitPayload) -> (Result_5);
 }
